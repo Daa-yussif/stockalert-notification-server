@@ -1,21 +1,9 @@
-const admin = require('firebase-admin');
-const path = require('path');
-require('dotenv').config();
-
-if (!admin.apps.length) {
-  const serviceAccount = require(
-    path.resolve(__dirname, '../serviceAccountKey.json')
-  );
-
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    projectId: process.env.FIREBASE_PROJECT_ID,
-  });
-
-  console.log('[Firebase] Initialized successfully');
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  // Production (Render)
+  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  credential = admin.credential.cert(serviceAccount);
+} else {
+  // Local
+  const serviceAccount = require('../../serviceAccountKey.json');
+  credential = admin.credential.cert(serviceAccount);
 }
-
-const db = admin.firestore();
-const messaging = admin.messaging();
-
-module.exports = { admin, db, messaging };
