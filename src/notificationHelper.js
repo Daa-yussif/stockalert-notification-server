@@ -22,10 +22,19 @@ async function removeInvalidTokens(tokens) {
 }
 
 /**
- * Send a multicast notification to all registered devices
+ * Send a multicast notification to all registered devices.
+ * Never throws — logs and returns instead, so a notification failure
+ * never crashes the Firestore listener / cron jobs.
  */
 async function sendNotification(title, body, data = {}) {
-  const tokens = await getTokens();
+  let tokens;
+  try {
+    tokens = await getTokens();
+  } catch (err) {
+    console.error('[FCM] Failed to fetch tokens:', err.message);
+    return;
+  }
+
   if (tokens.length === 0) {
     console.log('[FCM] No tokens found — skipping notification');
     return;
@@ -45,7 +54,14 @@ async function sendNotification(title, body, data = {}) {
     tokens,
   };
 
-  const response = await messaging.sendEachForMulticast(message);
+  let response;
+  try {
+    response = await messaging.sendEachForMulticast(message);
+  } catch (err) {
+    console.error('[FCM] sendEachForMulticast failed:', err.message);
+    return;
+  }
+
   console.log(`[FCM] Sent: ${response.successCount} success, ${response.failureCount} failed`);
 
   // Clean up invalid tokens
@@ -61,7 +77,14 @@ async function sendNotification(title, body, data = {}) {
       }
     }
   });
-  if (invalid.length > 0) await removeInvalidTokens(invalid);
+
+  if (invalid.length > 0) {
+    try {
+      await removeInvalidTokens(invalid);
+    } catch (err) {
+      console.error('[FCM] Failed to remove invalid tokens:', err.message);
+    }
+  }
 }
 
 module.exports = { sendNotification, getTokens };
