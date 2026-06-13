@@ -1,6 +1,7 @@
 const express = require('express');
 const { checkAllMedicines, checkSingleMedicine } = require('./medicineChecker');
 const { sendNotification } = require('./notificationHelper');
+const { askAssistant } = require('./aiAssistant');
 const { db } = require('./firebase');
 
 const router = express.Router();
@@ -84,6 +85,23 @@ router.get('/medicines/alerts', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// AI Assistant — answers questions about the inventory using Groq
+router.post('/ai-chat', async (req, res) => {
+  const { question } = req.body;
+
+  if (!question || typeof question !== 'string' || !question.trim()) {
+    return res.status(400).json({ error: 'Missing "question" in request body' });
+  }
+
+  try {
+    const answer = await askAssistant(question.trim());
+    res.json({ answer });
+  } catch (err) {
+    console.error('[API] AI Chat error:', err.message);
+    res.status(500).json({ error: 'Failed to get AI response' });
   }
 });
 
