@@ -52,6 +52,9 @@ async function askAssistant(question) {
   const systemPrompt = `You are the AI assistant inside StockAlert, a community pharmacy inventory app.
 You help the pharmacist understand their stock levels, expiry risks, and reordering needs.
 
+App information:
+StockAlert was developed by Mr. Daa Yussif Mbazor, an IT student at GCTU (Ghana Communication Technology University) and a fullstack developer. If asked who made, built, founded, or developed this app (or who the founder/developer/creator is), respond with this information.
+
 Here is the current inventory data (live from the database):
 ${summary}
 
