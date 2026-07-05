@@ -3,6 +3,7 @@ const { checkAllMedicines, checkSingleMedicine } = require('./medicineChecker');
 const { sendNotification } = require('./notificationHelper');
 const { askAssistant } = require('./aiAssistant');
 const { db } = require('./firebase');
+const { verifyAuth } = require('./authMiddleware');
 
 const router = express.Router();
 
@@ -41,17 +42,22 @@ router.post('/notify', async (req, res) => {
   }
 });
 
-// Register or update an FCM token
-router.post('/token', async (req, res) => {
+// Register or update an FCM token — now requires auth, scoped per user
+router.post('/token', verifyAuth, async (req, res) => {
   const { token } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'token is required' });
   }
   try {
-    await db.collection('fcm_tokens').doc(token).set({
-      token,
-      updatedAt: new Date().toISOString(),
-    });
+    await db
+      .collection('users')
+      .doc(req.uid)
+      .collection('fcm_tokens')
+      .doc(token)
+      .set({
+        token,
+        updatedAt: new Date().toISOString(),
+      });
     res.json({ success: true, message: 'Token registered' });
   } catch (err) {
     console.error('[API] Token error:', err);
@@ -59,12 +65,16 @@ router.post('/token', async (req, res) => {
   }
 });
 
-// List all medicines with alert status
-router.get('/medicines/alerts', async (req, res) => {
+// List THIS user's medicines with alert status — requires auth
+router.get('/medicines/alerts', verifyAuth, async (req, res) => {
   try {
     const now = new Date();
     const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const snap = await db.collection('medicines').get();
+    const snap = await db
+      .collection('users')
+      .doc(req.uid)
+      .collection('medicines')
+      .get();
 
     const result = { expired: [], nearExpiry: [], lowStock: [], ok: [] };
 
@@ -88,8 +98,8 @@ router.get('/medicines/alerts', async (req, res) => {
   }
 });
 
-// AI Assistant — answers questions about the inventory using Groq
-router.post('/ai-chat', async (req, res) => {
+// AI Assistant — answers questions using ONLY the authenticated user's data
+router.post('/ai-chat', verifyAuth, async (req, res) => {
   const { question } = req.body;
 
   if (!question || typeof question !== 'string' || !question.trim()) {
@@ -97,7 +107,8 @@ router.post('/ai-chat', async (req, res) => {
   }
 
   try {
-    const answer = await askAssistant(question.trim());
+    // req.uid comes from the verified Firebase ID token — cannot be spoofed
+    const answer = await askAssistant(question.trim(), req.uid);
     res.json({ answer });
   } catch (err) {
     console.error('[API] AI Chat error:', err.message);

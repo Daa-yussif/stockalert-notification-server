@@ -1,16 +1,23 @@
 const { db } = require('./firebase');
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-// Free, fast Llama model on Groq. Other options:
-// 'llama-3.1-8b-instant' (smaller/faster), 'mixtral-8x7b-32768'
 const MODEL = 'llama-3.3-70b-versatile';
 
 /**
- * Builds a compact text summary of the current inventory state —
- * this is what gives the AI "knowledge" of your Firestore data.
+ * Builds a compact text summary of ONE user's inventory —
+ * scoped to users/{uid}/medicines so no cross-account data leaks.
  */
-async function buildInventoryContext() {
-  const snap = await db.collection('medicines').get();
+async function buildInventoryContext(uid) {
+  if (!uid) {
+    throw new Error('buildInventoryContext requires a uid');
+  }
+
+  const snap = await db
+    .collection('users')
+    .doc(uid)
+    .collection('medicines')
+    .get();
+
   const medicines = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   const now = new Date();
@@ -32,22 +39,30 @@ async function buildInventoryContext() {
   });
 
   return {
-    summary: `Total medicines: ${medicines.length}\n\n${lines.join('\n')}`,
+    summary:
+      medicines.length === 0
+        ? 'This pharmacy has no medicines recorded yet.'
+        : `Total medicines: ${medicines.length}\n\n${lines.join('\n')}`,
     count: medicines.length,
   };
 }
 
 /**
- * Sends a user question + Firestore inventory context to Groq (Llama)
- * and returns the text response.
+ * Sends a user question + THEIR OWN Firestore inventory context to Groq.
+ * uid is required and must come from a verified Firebase ID token —
+ * never trust a uid sent directly in the request body.
  */
-async function askAssistant(question) {
+async function askAssistant(question, uid) {
+  if (!uid) {
+    throw new Error('askAssistant requires an authenticated uid');
+  }
+
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     throw new Error('GROQ_API_KEY is not set in environment variables');
   }
 
-  const { summary } = await buildInventoryContext();
+  const { summary } = await buildInventoryContext(uid);
 
   const systemPrompt = `You are the AI assistant inside StockAlert, a community pharmacy inventory app.
 You help the pharmacist understand their stock levels, expiry risks, and reordering needs.
@@ -55,10 +70,10 @@ You help the pharmacist understand their stock levels, expiry risks, and reorder
 App information:
 StockAlert was developed by Mr. Daa Yussif Mbazor, an IT student at GCTU (Ghana Communication Technology University) and a fullstack developer. If asked who made, built, founded, or developed this app (or who the founder/developer/creator is), respond with this information.
 
-Here is the current inventory data (live from the database):
+Here is the CURRENT PHARMACY's inventory data (live from the database, specific to this logged-in user only):
 ${summary}
 
-Answer the pharmacist's question using this data. Be concise and practical.
+Answer the pharmacist's question using ONLY this data. Never reference or assume data from any other pharmacy/account.
 If asked about something not covered by this data, say so honestly.`;
 
   const response = await fetch(GROQ_API_URL, {
