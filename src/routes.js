@@ -3,9 +3,13 @@ const { checkAllMedicines, checkSingleMedicine } = require('./medicineChecker');
 const { sendNotification } = require('./notificationHelper');
 const { askAssistant } = require('./aiAssistant');
 const { db } = require('./firebase');
-const { verifyAuth } = require('./authMiddleware');
+const { verifyAuth, resolveOwnerUid } = require('./authMiddleware');
+const staffRoutes = require('./staffRoutes');
 
 const router = express.Router();
+
+// Mount staff management routes
+router.use('/', staffRoutes);
 
 // Health check
 router.get('/health', (req, res) => {
@@ -42,21 +46,24 @@ router.post('/notify', async (req, res) => {
   }
 });
 
-// Register or update an FCM token — now requires auth, scoped per user
+// Register or update an FCM token — resolves staff -> owner uid
+// so a cashier's device gets registered against the SAME pharmacy data.
 router.post('/token', verifyAuth, async (req, res) => {
   const { token } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'token is required' });
   }
   try {
+    const ownerUid = await resolveOwnerUid(req.uid);
     await db
       .collection('users')
-      .doc(req.uid)
+      .doc(ownerUid)
       .collection('fcm_tokens')
       .doc(token)
       .set({
         token,
         updatedAt: new Date().toISOString(),
+        registeredByUid: req.uid,
       });
     res.json({ success: true, message: 'Token registered' });
   } catch (err) {
@@ -65,14 +72,15 @@ router.post('/token', verifyAuth, async (req, res) => {
   }
 });
 
-// List THIS user's medicines with alert status — requires auth
+// List THIS pharmacy's medicines with alert status — resolves staff -> owner
 router.get('/medicines/alerts', verifyAuth, async (req, res) => {
   try {
+    const ownerUid = await resolveOwnerUid(req.uid);
     const now = new Date();
     const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const snap = await db
       .collection('users')
-      .doc(req.uid)
+      .doc(ownerUid)
       .collection('medicines')
       .get();
 
@@ -98,7 +106,8 @@ router.get('/medicines/alerts', verifyAuth, async (req, res) => {
   }
 });
 
-// AI Assistant — answers questions using ONLY the authenticated user's data
+// AI Assistant — resolves staff -> owner uid so a cashier asking the AI
+// still gets answers about the PHARMACY's inventory, not their own empty data.
 router.post('/ai-chat', verifyAuth, async (req, res) => {
   const { question } = req.body;
 
@@ -107,8 +116,8 @@ router.post('/ai-chat', verifyAuth, async (req, res) => {
   }
 
   try {
-    // req.uid comes from the verified Firebase ID token — cannot be spoofed
-    const answer = await askAssistant(question.trim(), req.uid);
+    const ownerUid = await resolveOwnerUid(req.uid);
+    const answer = await askAssistant(question.trim(), ownerUid);
     res.json({ answer });
   } catch (err) {
     console.error('[API] AI Chat error:', err.message);
