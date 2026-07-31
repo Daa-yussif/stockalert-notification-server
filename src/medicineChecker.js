@@ -11,32 +11,31 @@ async function checkAllMedicines() {
   const now = new Date();
   const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  // Get all users
-  const usersSnap = await db.collection('users').get();
+  // Get every medicine across every user in one query, then group by uid.
+  // Using a collection group query (instead of db.collection('users').get())
+  // because Firestore only lists a parent doc in collection().get() if it
+  // has its own fields set — a users/{uid} doc that only ever had
+  // subcollections written to it (medicines, fcm_tokens) won't show up
+  // otherwise, which was silently skipping every user.
+  const allMedsSnap = await db.collectionGroup('medicines').get();
 
-  if (usersSnap.empty) {
-    console.log('[Checker] No users found — skipping');
+  if (allMedsSnap.empty) {
+    console.log('[Checker] No medicines found — skipping');
     return;
   }
 
+  const medsByUid = {};
+  allMedsSnap.docs.forEach((doc) => {
+    const uid = doc.ref.parent.parent?.id;
+    if (!uid) return;
+    if (!medsByUid[uid]) medsByUid[uid] = [];
+    medsByUid[uid].push({ id: doc.id, ...doc.data() });
+  });
+
   // Process each user separately
-  for (const userDoc of usersSnap.docs) {
-    const uid = userDoc.id;
-
+  for (const uid of Object.keys(medsByUid)) {
     try {
-      // Get this user's medicines
-      const medSnap = await db
-        .collection('users')
-        .doc(uid)
-        .collection('medicines')
-        .get();
-
-      if (medSnap.empty) continue;
-
-      const medicines = medSnap.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      const medicines = medsByUid[uid];
 
       const expired = [];
       const nearExpiry = [];
