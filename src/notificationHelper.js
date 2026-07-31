@@ -1,24 +1,40 @@
 const { messaging, db } = require('./firebase');
 
 /**
- * Fetch all valid FCM tokens from Firestore
+ * Fetch all valid FCM tokens from every user's users/{uid}/fcm_tokens
+ * subcollection, via a Firestore collection group query.
+ * This matches where the Flutter app actually writes tokens.
  */
 async function getTokens() {
-  const snap = await db.collection('fcm_tokens').get();
-  return snap.docs.map((d) => d.data().token).filter(Boolean);
+  const snap = await db.collectionGroup('fcm_tokens').get();
+  return snap.docs
+    .map((d) => d.data().token)
+    .filter(Boolean);
 }
 
 /**
- * Remove invalid/expired tokens from Firestore
+ * Remove invalid/expired tokens from Firestore.
+ * Looks each token up via a collection group query so it can delete
+ * the correct users/{uid}/fcm_tokens/{token} doc regardless of owner.
  */
 async function removeInvalidTokens(tokens) {
   if (tokens.length === 0) return;
+
+  const snap = await db.collectionGroup('fcm_tokens').get();
   const batch = db.batch();
-  tokens.forEach((token) => {
-    batch.delete(db.collection('fcm_tokens').doc(token));
+  let removed = 0;
+
+  snap.docs.forEach((doc) => {
+    if (tokens.includes(doc.data().token)) {
+      batch.delete(doc.ref);
+      removed += 1;
+    }
   });
-  await batch.commit();
-  console.log(`[FCM] Removed ${tokens.length} invalid token(s)`);
+
+  if (removed > 0) {
+    await batch.commit();
+    console.log(`[FCM] Removed ${removed} invalid token(s)`);
+  }
 }
 
 /**
