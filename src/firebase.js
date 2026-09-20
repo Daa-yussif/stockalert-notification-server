@@ -13,7 +13,7 @@ if (!admin.apps.length) {
   } else {
     // Local development — read from file
     const serviceAccount = require(
-      path.resolve(__dirname, '../../serviceAccountKey.json')
+      path.resolve(__dirname, '../serviceAccountKey.json')
     );
     credential = admin.credential.cert(serviceAccount);
     console.log('[Firebase] Initialized from local file');
